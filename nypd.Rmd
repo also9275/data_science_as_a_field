@@ -1,0 +1,121 @@
+---
+title: "NYPD Shooting Incident Data (Historic) analysis"
+author: "Alexey Sokolov"
+date: '2022-07-04'
+output:
+  pdf_document: default
+  html_document: default
+---
+```{r import_library, include=FALSE}
+library(tidyverse)
+library(lubridate)
+```
+### Read the data and show summary
+```{r read_data}
+data <- read_csv(
+  "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD",
+  show_col_types = FALSE)
+summary(data)
+```
+
+### Transform the data - remove unnecessesary columns and convert OCCUR_DATE to date format
+```{r transform_data}
+data <- data %>% select(-c(INCIDENT_KEY, PRECINCT, JURISDICTION_CODE,
+                           LOCATION_DESC, STATISTICAL_MURDER_FLAG, X_COORD_CD,
+                           Y_COORD_CD, Latitude, Longitude, Lon_Lat))
+data <- data %>% mutate(OCCUR_DATE = mdy(OCCUR_DATE))
+```
+
+### Summary of data
+```{r summary_data}
+summary(data)
+```
+
+### Check for missing values
+```{r missing_values_first}
+sum(is.na(data$OCCUR_DATE))
+sum(is.na(data$OCCUR_TIME))
+sum(is.na(data$BORO))
+sum(is.na(data$PERP_AGE_GROUP))
+sum(is.na(data$PERP_SEX))
+sum(is.na(data$PERP_RACE))
+sum(is.na(data$VIC_AGE_GROUP))
+sum(is.na(data$VIC_SEX))
+sum(is.na(data$VIC_RACE))
+```
+
+From the command above it's clear that we have missing values in PERP_AGE_GROUP,
+PERP_SEX and PERP_RACE. There are several ways to deal with missing values:
+
+1. Remove rows with missing values
+2. Do an Imputation (fill in the missing values with some number), for example
+we can use average values
+3. Imputation with extension. We can add additional column that will have TRUE
+value if this row has imputed value and FALSE otherwise. This way any model we 
+want to build will include imputation fact in it and it will be more correct
+
+For this I would suggest just to remove rows with missing values for every 
+column with missing values - PERP_AGE_GROUP, PERP_SEX and PERP_RACE and have 
+three additional datasets, this way we can save non missing values in other 
+columns.
+
+### Remove missing values
+```{r remove_missing_values}
+data_perp_age_group <- data %>% drop_na(PERP_AGE_GROUP)
+sum(is.na(data_perp_age_group$PERP_AGE_GROUP))
+
+data_perp_sex <- data %>% drop_na(PERP_SEX)
+sum(is.na(data_perp_sex$PERP_SEX))
+
+data_perp_race <- data %>% drop_na(PERP_RACE)
+sum(is.na(data_perp_race$PERP_RACE))
+```
+
+### Visualize data - Perpetrator and Vistim age groups
+```{r visualize_data}
+perp_age_group <- data_perp_age_group %>% count(PERP_AGE_GROUP)
+victim_age_group <- data %>% count(VIC_AGE_GROUP)
+perp_age_group %>% ggplot(aes(x=PERP_AGE_GROUP, y=n)) + geom_bar(stat="identity")
+victim_age_group %>% ggplot(aes(x=VIC_AGE_GROUP, y=n)) + geom_bar(stat="identity")
+```
+
+From this plot it's clear that two age groups (18-24 and 25-44) have majority of
+cases. Also we have some weird values in PERP_AGE_GROUP column: 1020, 224 and 
+940 (this could be an error)
+
+### Visualize data - Occurrence Time
+```{r occurence_time}
+occur_time <- data %>% count(OCCUR_TIME)
+occur_time %>% ggplot(aes(x=OCCUR_TIME, y=n)) + geom_line() + geom_point()
+```
+
+from this plot it's clear that majority of cases happen in night time
+
+### Visualize data - Borough Cases
+```{r borough_cases}
+borough_cases <- data %>% count(BORO)
+borough_cases %>% ggplot(aes(x=BORO, y=n)) + geom_bar(stat="identity")
+```
+
+From this plot it's clear that majority of cases happen in Brooklyn
+
+### Model data 
+```{r model_data}
+model <- lm(n ~ BORO, data = borough_cases)
+summary(model)
+borough_cases %>% mutate(pred = predict(model))
+```
+
+### Conclusion
+
+1. people in 18-24 and 25-44 have majority of cases
+2. majority of cases happen in night time
+3. majority of cases happen in Brooklyn
+
+As any human I have lots of biases including perpetrator sex and race for 
+example. I think there are two possible solutions to mitigate that:
+1. Analyze data in all possible combinations with all possible types of 
+visualizations. That's ideal solution but quite often it's just not feasible
+2. Work only with unpersonalized data, for example instead of Categorical race 
+and sex columns it's possible to use some numbers instead 
+(for example 0 - Male and 1 - Female)
